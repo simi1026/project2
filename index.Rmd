@@ -1,7 +1,7 @@
 ---
 title: 'Project 2: Data Mining, Classification, Prediction'
 author: "SDS322E"
-date: ''
+date: '12/10/2021'
 output:
   html_document:
     toc: yes
@@ -46,76 +46,196 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Simran Shah sks3534
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
-
+The first dataset I chose reports the percent of adults that reported experiencing symptoms related to depression and anxiety, and the percent of households that have lost or have not lost a income from employment (job), for each state in the U.S.A. The second dataset explored the availability of health care services, by reporting the number of visits made to federally qualified clinics, number of total federal clinics present, number of virtual clinics, number of service delivery sites, and lastly the total number of visits made to a physician, for each state and U.S territory. Both data sets have 52 USA states with 9 columns/variables to report for each state, after merging the two dataframes. There are no categorical variables present in the raw data. Categorical variables where created by assigning high and low levels to values above and below the median value for the number of clinical visits and percentage of households that have experienced job loss. In addition, the proportion of clinical visits was calculated by dividing the raw number of clinical visits for each state by the total number clinical visits. This data was collected relative to the start of the Covid-19 pandemic, and acquired via self-report surveys, physician reporting of clinical visits, and through the Health Resources and Services Administration data reporting. I picked these two dataset to see the relationship between mental health status (symptoms of depression and anxiety) and access to health care services, during the Covid-19 pandemic. 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
 
-# if your dataset needs tidying, do so here
-
-# any other code here
+CHC_sites <- read.csv("~/project2/CHC_sites_csv.csv")
+MD_covid <- read.csv("~/project2/MD_covid.csv")
+merged_df <- left_join(MD_covid, CHC_sites, by = 'Location') %>% mutate(Clinical.Visits = str_replace_all(Clinical.Visits, ",", "") ,Clinical.Visits = as.numeric(Clinical.Visits), prop_clinicalVisits = Clinical.Visits / 85678538, lowHigh_clinVisits = ifelse(Clinical.Visits > median(Clinical.Visits), 'High', 'Low' ), lowHigh_lossIncome = ifelse(Household.Job.Loss.Since.March.2020 > median(Household.Job.Loss.Since.March.2020), 'High', 'Low' ))
+head(merged_df)
 ```
 
 ### Cluster Analysis
 
 ```{R}
+
+#predict all adults based on household income loss, number of clinical visits, and service delivery sites 
 library(cluster)
-# clustering code here
+
+dat2 <- merged_df %>% select(c('All.Adults', 'lowHigh_clinVisits', 'Household.Job.Loss.Since.March.2020', 'Total.CHCs', 'Virtual.Visits') ) %>% mutate(lowHigh_clinVisits = as.factor(lowHigh_clinVisits)) %>% mutate(All.Adults = as.numeric(All.Adults)) %>% mutate(Household.Job.Loss.Since.March.2020 = as.numeric(Household.Job.Loss.Since.March.2020)) %>% mutate(Total.CHCs = as.numeric(Total.CHCs)) %>% mutate(Virtual.Visits = as.numeric(Virtual.Visits))
+
+gower1 <- daisy(dat2, metric="gower")
+
+#Number of Clusters
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(gower1, diss = TRUE, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+#PAM clustering using gower
+pam3 <- pam(gower1, k = 2, diss = T)
+plot(pam3,which=2)
+
+colnames(dat2)[2] <- 'Clinical_Visits'
+colnames(dat2)[3] <- 'Job_Loss'
+
+
+#Visualization
+library(GGally)
+pair_plot <- ggpairs(dat2, columns=1:5, aes(color=as.factor(pam3$clustering)), cardinality_threshold = 60, upper = list(continuous = wrap("cor", size = 3)))
+pair_plot[4,4]= pair_plot[4,4] + scale_y_continuous(limits  = 0:15) 
+pair_plot
 ```
 
-Discussion of clustering here
+From the merged dataframe, I subsetted out the following columns to perform clustering on: 'All.Adults', 'lowHigh_clinVisits', 'Household.Job.Loss.Since.March.2020', 'Total.CHCs', 'Virtual.Visits'. With the subsetted dataframe, I performed gower clustering by including the categorical variable lowHigh_clinVisits, which categorizes the number of clinical visits into either low or high levels based on the median value. Based on the silhouette width plot, the goodness of fit line showed that 2 clusters has the highest average silhouette width. The average silhouette width is 0.49, indicating that the structure identified is weak and could potentially be artificially created. After determining that 2 clusters would be best, PAM clustering was performed on the numeric gower dissimilatiries. The pairwise plot shows the distribution of responses and correlation values for each variable in relation to each other. Based on the correlation values, the households that experienced job loss is strongly positively correlated with the percent of adults that reported symptoms of depression and anxiety. The total number of virtual visits conducted (for each U.S. state) is moderately positively correlated with the percent of adults that reported symptoms of depression and anxiety. The scatter plot for the percent of adults that reported symptoms of depression and anxiety and the number of households that experiences loss of employment is trending in a positive direction, which may support the strong positive correlation value. In conclusion, the distribution visualizations and correlation values indicate a relationship between job loss and experiencing symptoms related to depression and anxiety, which may be worth further diving into. 
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+dat2_nums <- dat2 %>% select(-c(Clinical_Visits)) %>% mutate(All.Adults = as.numeric(All.Adults)) %>% mutate(Job_Loss = as.numeric(Job_Loss)) %>% mutate(Virtual.Visits = as.numeric(Virtual.Visits)) %>% mutate(Total.CHCs = as.numeric(Total.CHCs))
+dat2_pca<-princomp(dat2_nums)
+names(dat2_pca)
+summary(dat2_pca, loadings=T)
+
+eigval<-dat2_pca$sdev^2 #square to convert SDs to eigenvalues
+varprop=round(eigval/sum(eigval), 2) #proportion of var explained by each PC
+ggplot() + geom_bar(aes(y=varprop, x=1:4), stat="identity") + xlab("") +
+  geom_text(aes(x=1:4, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=5) +
+  scale_y_continuous(breaks=seq(0, .6, .2), labels = scales::percent) + 
+  scale_x_continuous(breaks=1:10)
+
+#PC1 and PC2 
+round(cumsum(eigval)/sum(eigval), 2)
+
+#no variation/clustering of points
+dat2_df <- data.frame(Name=merged_df$Location, PC1=dat2_pca$scores[, 1],PC2=dat2_pca$scores[, 2])
+ggplot(dat2_df, aes(PC1, PC2)) + geom_point()
+
 ```
 
-Discussions of PCA here. 
+Firstly, any variable that seemed redundant, including number of clinical visits per state, were eliminated from the dataset, before performing principle component analysis (PCA). PCA was performed on select numeric variables: the percent of adults that reported symptoms of depression and anxiety, percent of households that experienced job loss, number of virtual health visits collected, and the total number of CHCs (total number of federal health care clinics). PC1 correlates strongly with the total number of virtual visits, indicating the the number of virtual visits fully contributes to PC1. In contrast, PC2 can be largely explained by the total number of CHCs in each state. PC3 shows that states with a big percentage of households who experienced job loss have a moderately large percentage of adults who reported symptoms of depression and anxiety. In contrast, PC4 shows that states with a large percentage of adults who reported symptoms of depression and anxiety have a small percentage of households that experience job loss. The scree plot shows that the first two loadings are responsible for all of the explained variance of the data. The cumulative sum of the first two PCs (PC1 and PC2) is greater than 0.85, which points us to use and visualize the first two PCs. The PCA plot visualizing the first 2 PCs that are responsible for explained variance, does not show any grouping or separation of the points, and thus the variation present in the data is not influenced by PC1 or PC2, as visually observed in the plot. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+dat3 <- merged_df %>% mutate(lowHigh_Adult_report = ifelse(All.Adults > median(All.Adults), 'High', 'Low' )) %>% select(-c('lowHigh_clinVisits', 'lowHigh_lossIncome', 'All.Adults', 'Location'))
+
+fit <- glm(lowHigh_Adult_report =='High' ~ Household.Job.Loss.Since.March.2020  + Total.CHCs + Service.Delivery.Sites + Clinical.Visits + Virtual.Visits + Total.Visits + prop_clinicalVisits, data=dat3, family = "binomial")
+score <- predict(fit, type="response")
+score %>% round(3)
+
+class_diag(score, truth = dat3$lowHigh_Adult_report, positive = 'High')
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+
+set.seed(1234)
+k=10 #choose number of folds
+data<-dat3[sample(nrow(dat3)),] #randomly order rows
+folds<-cut(seq(1:nrow(dat3)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$lowHigh_Adult_report ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit <- glm(lowHigh_Adult_report =='High' ~ as.numeric(Household.Job.Loss.Since.March.2020)  + as.numeric(Total.CHCs) + as.numeric(Service.Delivery.Sites) +   as.numeric(Clinical.Visits) + as.numeric(Virtual.Visits) + as.numeric(Total.Visits) + as.numeric(prop_clinicalVisits), data=train, family = "binomial")
+  ## Test model on test set (fold i) 
+  probs<-predict(fit, newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive="High"))
+}
+
+summarize_all(diags,mean)
+
+
+#confusion matrix 
+#No need for ifelse really, just make a table showing the TP, FP, TN, and FN counts. Just get your predicted probabilities from the model, use a threshold of .5 to classify a case as positive, and compare those with your actual/true values. 
+
+probs_all <- predict(fit, newdata = dat3, type = 'response')
+actual_predicted_df <- data.frame('Actual' = dat3$lowHigh_Adult_report, 'Predicted' = probs_all) 
+actual_predicted_df <- actual_predicted_df %>% mutate(Pred_highLow = ifelse(as.numeric(Predicted) > 0.5, 'High', 'Low'))
+
+y_hat <- factor(actual_predicted_df$Pred_highLow, levels=c("High","Low"))
+y <- factor(actual_predicted_df$Actual, levels=c("High","Low"))
+table(actual = y, predicted = y_hat)
+
 ```
 
-Discussion here
+Firstly, the percentage of adults who reported symptoms of depression and anxiety was converted into a categorical variable, with levels of 'High' and 'Low" assigned based on the median value. The area under the curve (AUC) and the accuracy metric (acc) when trying to predict the categorical variable - high and low levels of adults reporting symptoms- using the remaining numeric variables was 1, indicating that the generalized linear model (GLM) accurately classified all samples (US states) as either having a high or a low percentage of adults who reported symptoms of depression and anxiety. Then the model was trained on 46 sample and tested on a 6 samples, and a 10-cross validation was performed. Based on the trained model, the model is predicting new observations per cross validation at an overall (mean) AUC of 0.8166. We can see sign of overfitting because the model did not perform as well when cross-validating, indicated by the drop in AUC. 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+fit<-knnreg(as.factor(lowHigh_Adult_report)~.,data=dat3) 
+yhat<-predict(fit,newdata=dat3) 
+class_diag(yhat, dat3$lowHigh_Adult_report,  positive="High")
+
 ```
 
 ```{R}
-# cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-dat3 %>% sample_frac() #randomly order rows
+folds<-cut(seq(1:nrow(dat3)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-knnreg(as.factor(lowHigh_Adult_report)~.,data=train)
+  ## Get predictions/y-hats on test set (fold i)
+  train_probs <-predict(fit, newdata=test)
+}
+class_diag(train_probs, test$lowHigh_Adult_report,  positive="High")
+
 ```
 
-Discussion
+K nearest neighbors (knn) was used to predict high and low levels of adults reporting depression and anxiety symptoms on the whole dataset, which resulted in an accuracy metric of 0.5 and an AUC of 0.2618. Then a 10-fold cross validation was performed, on a train sample of 46 and a test sample of 6. The overall AUC per cross validation is 0.3125 with an accuracy of 0.3333. The drop in AUC from when was used on all of the data to cross-validation indicates overfitting of the model. In addition, the decrease of accurage from 0.5 to 0.33 also supports that the trained CV model is showing signs of overfitting and not performing well. The general linear model (GLM) seems to be performing better than the knn model with the 10-fold corss validated GLM model's higher accuracy and AUC scores.  
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+fit<-lm(Total.Visits ~ as.numeric(Household.Job.Loss.Since.March.2020) + as.numeric(Service.Delivery.Sites),data=dat3) #predict mpg from all other variables
+yhat<-predict(fit) #predicted mpg
+mean((as.numeric(dat3$Total.Visits)-yhat)^2) #mean squared error (MSE)
 ```
 
 ```{R}
-# cross-validation of regression model here
+
+set.seed(1234)
+k=5 #choose number of folds
+data<-dat3[sample(nrow(dat3)),] #randomly order rows
+folds<-cut(seq(1:nrow(dat3)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-lm(Total.Visits ~ as.numeric(Household.Job.Loss.Since.March.2020) + as.numeric(Service.Delivery.Sites),data=train)
+  ## Get predictions/y-hats on test set (fold i)
+  yhat<-predict(fit,newdata=test)
+  ## Compute prediction error  (MSE) for fold i
+  diags<-mean((as.numeric(test$Total.Visits)-yhat)^2) 
+}
+mean(diags) ## get average MSE across all folds (much higher error)!
+#MSE higher in CV, not good (means overfitting)!
+
 ```
 
-Discussion
+A linear regression model was fit to the whole dataset, which resulted in a mean squared error (MSE) of 229.6993. When the linear model was fit to a train sample, consisting of 41 samples, and then ran on a test sample of 11 samples, the MSE was 258.7634. The MSE in the 5-fold cross validation (258.7634) is greater than when the linear model was fit the whole data set (229.6993), indicating slight overfitting. 
 
 ### Python 
 
@@ -124,14 +244,87 @@ library(reticulate)
 ```
 
 ```{python}
-# python code here
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+states_list = list(r.merged_df.iloc[0:,0])
+
+us_state_to_abbrev = {
+    "Alabama": "AL",
+    "Alaska": "AK",
+    "Arizona": "AZ",
+    "Arkansas": "AR",
+    "California": "CA",
+    "Colorado": "CO",
+    "Connecticut": "CT",
+    "Delaware": "DE",
+    "Florida": "FL",
+    "Georgia": "GA",
+    "Hawaii": "HI",
+    "Idaho": "ID",
+    "Illinois": "IL",
+    "Indiana": "IN",
+    "Iowa": "IA",
+    "Kansas": "KS",
+    "Kentucky": "KY",
+    "Louisiana": "LA",
+    "Maine": "ME",
+    "Maryland": "MD",
+    "Massachusetts": "MA",
+    "Michigan": "MI",
+    "Minnesota": "MN",
+    "Mississippi": "MS",
+    "Missouri": "MO",
+    "Montana": "MT",
+    "Nebraska": "NE",
+    "Nevada": "NV",
+    "New Hampshire": "NH",
+    "New Jersey": "NJ",
+    "New Mexico": "NM",
+    "New York": "NY",
+    "North Carolina": "NC",
+    "North Dakota": "ND",
+    "Ohio": "OH",
+    "Oklahoma": "OK",
+    "Oregon": "OR",
+    "Pennsylvania": "PA",
+    "Rhode Island": "RI",
+    "South Carolina": "SC",
+    "South Dakota": "SD",
+    "Tennessee": "TN",
+    "Texas": "TX",
+    "Utah": "UT",
+    "Vermont": "VT",
+    "Virginia": "VA",
+    "Washington": "WA",
+    "West Virginia": "WV",
+    "Wisconsin": "WI",
+    "Wyoming": "WY",
+    "District of Columbia": "DC",
+    "American Samoa": "AS",
+    "Guam": "GU",
+    "Northern Mariana Islands": "MP",
+    "Puerto Rico": "PR",
+    "United States Minor Outlying Islands": "UM",
+    "U.S. Virgin Islands": "VI",
+}
+
+list_abb = list()
+for keys, values in us_state_to_abbrev.items(): 
+  if keys in states_list:
+    print(values)
+
+
+
+
 ```
 
-Discussion
+In the python code above, I subsetted out the 'Locations' column which contains the name of each state in the USA. Then I created a dictionary that matches the name of each state to its 2-letter abbreviation. Using a for loop with an if statement, I checked to see if the keys in the list matched the states in the location column, and printed out the correlating values (2-letter abbreviations). 
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
+Thank you! Have a wonderful break and holidays!
 
 
 
